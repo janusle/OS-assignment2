@@ -177,7 +177,7 @@ void* write_targetfile( void *gloinfo )
      gloinfoptr->buffer[gloinfoptr->rptr] = NULL;
 
       
-     gloinfoptr->rptr = (gloinfoptr->rptr+1)%LINELEN;
+     gloinfoptr->rptr = (gloinfoptr->rptr+1)%BUFSIZE;
      semaphore_up( &readbuffer );
 
      if ( fputs( line, gloinfoptr->writefd ) == EOF ){
@@ -241,7 +241,7 @@ void* read_sourcefile( void *gloinfo )
          /* for test */ 
          /*fprintf(stderr, "%s", line );*/
          /* move ptr to next available position */
-         gloinfoptr->wptr = (gloinfoptr->wptr+1)%LINELEN;
+         gloinfoptr->wptr = (gloinfoptr->wptr+1)%BUFSIZE;
      } 
 
      semaphore_up( &full ); 
