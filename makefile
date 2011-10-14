@@ -1,5 +1,5 @@
 CC=gcc
-FALG=-g -Wall -ansi
+FLAG=-g -Wall -ansi
 
 All: os2
 
