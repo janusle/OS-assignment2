@@ -51,7 +51,9 @@ typedef struct {
   /* shared buffer */
   char **buffer; 
   /* pointer to next position in buffer */
-  int ptr;
+  int wptr;
+  /* pointer to next position in buffer */
+  int rptr;
   /* end of file flag */
   int eofflag; 
   /* read descriptor */ 
@@ -101,7 +103,8 @@ main( int argc, char** argv )
   for( i=0; i<BUFSIZE; i++ ){
     gloinfo.buffer[i] = NULL;
   }
-  gloinfo.ptr = 0;
+  gloinfo.wptr = 0;
+  gloinfo.rptr = 0;
   gloinfo.eofflag = OFF;
   gloinfo.readfd = Fopen( argv[SOURCEFILE], "r");
   gloinfo.writefd = Fopen( argv[TARGETFILE], "w");
@@ -135,6 +138,8 @@ main( int argc, char** argv )
     free(gloinfo.buffer[i]);
   }
   free( gloinfo.buffer );
+  fclose( gloinfo.readfd);
+  fclose( gloinfo.writefd);
   return EXIT_SUCCESS;
 }
 
@@ -156,7 +161,7 @@ void* write_targetfile( void *gloinfo )
      /* check if eof flag is on */
      if( gloinfoptr->eofflag == ON && 
          semaphore_value(&full)== 0 ){
-        /*fprintf(stderr, "%ld quit\n", (long)pthread_self() );*/
+        fprintf(stderr, "%ld quit\n", (long)pthread_self() );
         pthread_exit( (void *)EXIT_SUCCESS );
      }
 
@@ -165,14 +170,14 @@ void* write_targetfile( void *gloinfo )
      semaphore_down( &write );
   
      /* get line from buffer */
-     strcpy( line, gloinfoptr->buffer[gloinfoptr->ptr] );
+     strcpy( line, gloinfoptr->buffer[gloinfoptr->rptr] );
 
      /* free read line */
-     free( gloinfoptr->buffer[gloinfoptr->ptr] );
-     gloinfoptr->buffer[gloinfoptr->ptr] = NULL;
+     free( gloinfoptr->buffer[gloinfoptr->rptr] );
+     gloinfoptr->buffer[gloinfoptr->rptr] = NULL;
 
       
-     gloinfoptr->ptr = (gloinfoptr->ptr+1)%LINELEN;
+     gloinfoptr->rptr = (gloinfoptr->rptr+1)%LINELEN;
      semaphore_up( &readbuffer );
 
      if ( fputs( line, gloinfoptr->writefd ) == EOF ){
@@ -232,11 +237,11 @@ void* read_sourcefile( void *gloinfo )
 
      /* if only eofflag is off, add line to buffer */
      if( gloinfoptr->eofflag == OFF ){
-         gloinfoptr->buffer[gloinfoptr->ptr] = line;
+         gloinfoptr->buffer[gloinfoptr->wptr] = line;
          /* for test */ 
-         fprintf(stderr, "%s", line );
+         /*fprintf(stderr, "%s", line );*/
          /* move ptr to next available position */
-         gloinfoptr->ptr = (gloinfoptr->ptr+1)%LINELEN;
+         gloinfoptr->wptr = (gloinfoptr->wptr+1)%LINELEN;
      } 
 
      semaphore_up( &full ); 
