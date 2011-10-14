@@ -1,4 +1,5 @@
 #include<stdio.h>
+#include<string.h>
 #include "semaphore.h"
 
 /* argument number (should be 3) */
@@ -112,15 +113,19 @@ main( int argc, char** argv )
   Pthread_create( &readt3, NULL, read_sourcefile, &gloinfo );
   
   /* start writing threads */ 
-  /*
+  
   Pthread_create( &writet1, NULL, write_targetfile ,&gloinfo );
   Pthread_create( &writet2, NULL, write_targetfile ,&gloinfo );
   Pthread_create( &writet3, NULL, write_targetfile ,&gloinfo );
-  */
+  
 
   pthread_join( readt1 , NULL );
   pthread_join( readt2 , NULL );
   pthread_join( readt3 , NULL );
+
+  pthread_join( writet1 , NULL );
+  pthread_join( writet2 , NULL );
+  pthread_join( writet3 , NULL );
 
   /* destory everything */
   semaphore_destroy( &read );
@@ -132,6 +137,57 @@ main( int argc, char** argv )
   free( gloinfo.buffer );
   return EXIT_SUCCESS;
 }
+
+
+
+void* write_targetfile( void *gloinfo )
+{
+  
+   global_info *gloinfoptr;
+   char line[LINELEN];
+
+   /* for test */
+   /*fprintf(stderr, "%ld start\n", (long)pthread_self() );*/
+
+   gloinfoptr = ( global_info* )gloinfo;
+
+   while(1){
+  
+     /* check if eof flag is on */
+     if( gloinfoptr->eofflag == ON && 
+         semaphore_value(&full)== 0 ){
+        /*fprintf(stderr, "%ld quit\n", (long)pthread_self() );*/
+        pthread_exit( (void *)EXIT_SUCCESS );
+     }
+
+     semaphore_down( &full );
+     semaphore_down( &readbuffer );     
+     semaphore_down( &write );
+  
+     /* get line from buffer */
+     strcpy( line, gloinfoptr->buffer[gloinfoptr->ptr] );
+
+     /* free read line */
+     free( gloinfoptr->buffer[gloinfoptr->ptr] );
+     gloinfoptr->buffer[gloinfoptr->ptr] = NULL;
+
+      
+     gloinfoptr->ptr = (gloinfoptr->ptr+1)%LINELEN;
+     semaphore_up( &readbuffer );
+
+     if ( fputs( line, gloinfoptr->writefd ) == EOF ){
+        perror("I/O error");
+        exit(EXIT_FAILURE);
+     }
+    
+     /* for test */
+     fprintf(stderr, "%s", line );
+
+     semaphore_up( &empty ); 
+     semaphore_up( &write );
+   }
+}
+
 
 
 void* read_sourcefile( void *gloinfo )
