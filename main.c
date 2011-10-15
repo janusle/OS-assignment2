@@ -152,18 +152,28 @@ void* write_targetfile( void *gloinfo )
    char line[LINELEN];
 
    /* for test */
-   /*fprintf(stderr, "%ld start\n", (long)pthread_self() );*/
+   fprintf(stderr, "%ld start\n", (long)pthread_self() );
 
    gloinfoptr = ( global_info* )gloinfo;
 
    while(1){
   
      /* check if eof flag is on */
+     /*
      if( gloinfoptr->eofflag == ON && 
          semaphore_value(&full)== 0 ){
         fprintf(stderr, "%ld quit\n", (long)pthread_self() );
         pthread_exit( (void *)EXIT_SUCCESS );
      }
+     */
+     while( semaphore_value(&full) == 0 ){
+        if( gloinfoptr->eofflag == ON  )
+          pthread_exit( (void*)EXIT_SUCCESS );
+        else
+          sleep(1);
+     }
+
+     fprintf(stderr, "%d\n", semaphore_value(&full) );
 
      semaphore_down( &full );
      semaphore_down( &readbuffer );     
@@ -242,9 +252,9 @@ void* read_sourcefile( void *gloinfo )
          /*fprintf(stderr, "%s", line );*/
          /* move ptr to next available position */
          gloinfoptr->wptr = (gloinfoptr->wptr+1)%BUFSIZE;
+         semaphore_up( &full ); 
      } 
 
-     semaphore_up( &full ); 
      semaphore_up( &writebuffer );
    }
 }
