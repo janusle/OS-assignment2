@@ -36,6 +36,8 @@ Semaphore writebuffer;
 Semaphore full;
 Semaphore empty;
 
+Semaphore fullmutex;
+
 /* wrapper functions */
 void Pthread_create( pthread_t *tidp, 
                      const pthread_attr_t *attr,
@@ -95,6 +97,7 @@ main( int argc, char** argv )
   semaphore_init( &writebuffer );
   semaphore_init( &empty );
   semaphore_init( &full );
+  semaphore_init( &fullmutex );
   empty.v = BUFSIZE;
   full.v = 0;
   
@@ -155,27 +158,36 @@ void* write_targetfile( void *gloinfo )
    fprintf(stderr, "%ld start\n", (long)pthread_self() );
 
    gloinfoptr = ( global_info* )gloinfo;
-
+   
+   /*fprintf(stderr, "w %ld start\n", (long)pthread_self() );*/
    while(1){
-  
-     /* check if eof flag is on */
-     /*
+
+     semaphore_down( &fullmutex );
+
+     
+     /* check if eof flag is on */ 
      if( gloinfoptr->eofflag == ON && 
          semaphore_value(&full)== 0 ){
-        fprintf(stderr, "%ld quit\n", (long)pthread_self() );
-        pthread_exit( (void *)EXIT_SUCCESS );
+         fprintf(stderr, "w %ld quit\n", (long)pthread_self() );
+         semaphore_up( &fullmutex ); 
+         pthread_exit( (void *)EXIT_SUCCESS );
      }
-     */
+
+     /*
      while( semaphore_value(&full) == 0 ){
         if( gloinfoptr->eofflag == ON  )
           pthread_exit( (void*)EXIT_SUCCESS );
         else
           sleep(1);
      }
-
-     fprintf(stderr, "%d\n", semaphore_value(&full) );
+     */
+     /*fprintf(stderr, "%d\n", semaphore_value(&full) );*/
 
      semaphore_down( &full );
+     semaphore_up( &fullmutex ); 
+    
+     
+     /*fprintf(stderr, "w %ld full\n", (long)pthread_self() );*/
      semaphore_down( &readbuffer );     
      semaphore_down( &write );
   
@@ -196,7 +208,7 @@ void* write_targetfile( void *gloinfo )
      }
     
      /* for test */
-     fprintf(stderr, "%s", line );
+     /*fprintf(stderr, "%s", line );*/
 
      semaphore_up( &empty ); 
      semaphore_up( &write );
@@ -216,11 +228,12 @@ void* read_sourcefile( void *gloinfo )
 
    gloinfoptr = ( global_info* )gloinfo;
 
+   fprintf(stderr, "r %ld start\n", (long)pthread_self() );
    while(1){
   
      /* check if eof flag is on */
      if( gloinfoptr->eofflag == ON  ){
-        /*fprintf(stderr, "%ld quit\n", (long)pthread_self() );*/
+        fprintf(stderr, "r %ld quit\n", (long)pthread_self() );
         pthread_exit( (void *)EXIT_SUCCESS );
      }
 
