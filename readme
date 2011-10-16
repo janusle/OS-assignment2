@@ -1,0 +1,13 @@
+Student Name: Yan Le
+Student Number: s3262302
+
+I implemented everything including threads for reading file and threads 
+for writing target file. I didn't do the bonus part.
+
+To compile file, just run 'make' command. 
+The program is named 'os2'. 
+To run the program, just execute it like 'os2 sourcefile targetfile'
+
+
+
+

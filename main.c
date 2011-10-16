@@ -25,28 +25,6 @@
 /* length of line */
 #define LINELEN 1024
 
-/* For control access to source file */
-Semaphore read; 
-
-/* For control access to target file */
-Semaphore write;
-
-Semaphore readbuffer;
-Semaphore writebuffer;
-Semaphore full;
-Semaphore empty;
-
-Semaphore fullmutex;
-
-/* wrapper functions */
-void Pthread_create( pthread_t *tidp, 
-                     const pthread_attr_t *attr,
-                     void *(*start_rtn)(void*),
-                     void *arg );
-void* Malloc( size_t size );
-FILE* Fopen( const char *filename, const char *mode );
-
-
 /* the struct is used to store global information 
  * such as shared buffer, close flag , read and write descriptor */
 typedef struct {
@@ -62,15 +40,55 @@ typedef struct {
   FILE* readfd;
   /* write descriptor */
   FILE* writefd;
-  
-
 } global_info;
 
+
+/* Mutex for controlling access to source file */
+Semaphore read; 
+
+/* Mutex for controlling access to target file */
+Semaphore write;
+
+/* Mutex for controlling access to read buffer */
+Semaphore readbuffer;
+
+/* Mutex for  controlling access to write buffer */
+Semaphore writebuffer;
+
+/* For P/V operation */
+Semaphore full;
+Semaphore empty;
+
+/* Mutex for controlling access to semaphore full 
+ * Each time ,there is just one thread can access 
+ * to check value of semaphore full */
+Semaphore fullmutex;
+
+
+/* global information about shared buffer, eof flag and etc */
+global_info gloinfo;
+
+/* wrapper functions */
+void Pthread_create( pthread_t *tidp, 
+                     const pthread_attr_t *attr,
+                     void *(*start_rtn)(void*),
+                     void *arg );
+void* Malloc( size_t size );
+FILE* Fopen( const char *filename, const char *mode );
+void Pthread_join( pthread_t thread, void **rval_ptr );
 
 /* function for reading source file */
 void* read_sourcefile( void *arg );
 /* function for writing target file */
 void* write_targetfile( void *arg );
+
+
+/* Exit handler 
+ * When any error occurs, the exit() function
+ * will be called, and before program termination,
+ * exit() function will call exit_handler() to free all
+ * memory the program allocated and destroy all semaphore */
+void exit_handler();
 
 
 int 
@@ -80,17 +98,23 @@ main( int argc, char** argv )
   pthread_t readt1, readt2, readt3;
   /* threads for writing target file */
   pthread_t writet1, writet2, writet3;
-  global_info gloinfo;
-  
-  
-  int i;
+  int i; 
+  void *res;
 
+  /* check if source file and target file are specified */
   if ( argc < ARGNUM ){
      fprintf( stderr, "Missing source file or target file\n");
      exit( EXIT_FAILURE );
   }
- 
-  /* Initialising semaphores */
+
+
+  /* set exit handler */
+  if ( atexit( exit_handler ) != 0 ){
+     perror("set exit handler error");
+     exit( EXIT_FAILURE );
+  }
+
+  /* Initialising semaphores and mutex */
   semaphore_init( &read );
   semaphore_init( &write );
   semaphore_init( &readbuffer );
@@ -98,6 +122,8 @@ main( int argc, char** argv )
   semaphore_init( &empty );
   semaphore_init( &full );
   semaphore_init( &fullmutex );
+
+  /* set semaphores for P/V operation */
   empty.v = BUFSIZE;
   full.v = 0;
   
@@ -114,180 +140,135 @@ main( int argc, char** argv )
 
 
   /* start reading threads */
-  Pthread_create( &readt1, NULL, read_sourcefile, &gloinfo );
-  Pthread_create( &readt2, NULL, read_sourcefile, &gloinfo );
-  Pthread_create( &readt3, NULL, read_sourcefile, &gloinfo );
+  Pthread_create( &readt1, NULL, read_sourcefile, NULL );
+  Pthread_create( &readt2, NULL, read_sourcefile, NULL );
+  Pthread_create( &readt3, NULL, read_sourcefile, NULL );
   
-  /* start writing threads */ 
-  
-  Pthread_create( &writet1, NULL, write_targetfile ,&gloinfo );
-  Pthread_create( &writet2, NULL, write_targetfile ,&gloinfo );
-  Pthread_create( &writet3, NULL, write_targetfile ,&gloinfo );
+  /* start writing threads */  
+  Pthread_create( &writet1, NULL, write_targetfile , NULL );
+  Pthread_create( &writet2, NULL, write_targetfile , NULL );
+  Pthread_create( &writet3, NULL, write_targetfile , NULL );
   
 
-  pthread_join( readt1 , NULL );
-  pthread_join( readt2 , NULL );
-  pthread_join( readt3 , NULL );
+  Pthread_join( readt1 , &res );
+  Pthread_join( readt2 , &res );
+  Pthread_join( readt3 , &res );
 
-  pthread_join( writet1 , NULL );
-  pthread_join( writet2 , NULL );
-  pthread_join( writet3 , NULL );
+  Pthread_join( writet1 , &res );
+  Pthread_join( writet2 , &res );
+  Pthread_join( writet3 , &res );
 
-  /* destory everything */
-  semaphore_destroy( &read );
-  semaphore_destroy( &write ); 
-  /* free buffer */
-  for( i=0; i<BUFSIZE; i++ ){
-    free(gloinfo.buffer[i]);
-  }
-  free( gloinfo.buffer );
-  fclose( gloinfo.readfd);
-  fclose( gloinfo.writefd);
+  /* exit_handler will be called to free memory the program allocated,
+   * destory all semalhores and close all file descriptors */ 
   return EXIT_SUCCESS;
 }
 
 
-
-void* write_targetfile( void *gloinfo )
+void* write_targetfile( void *data )
 {
   
-   global_info *gloinfoptr;
    char line[LINELEN];
-
-   /* for test */
-   /*fprintf(stderr, "%ld start\n", (long)pthread_self() );*/
-
-   gloinfoptr = ( global_info* )gloinfo;
-   
-   /*fprintf(stderr, "w %ld start\n", (long)pthread_self() );*/
+ 
    while(1){
 
-     semaphore_down( &fullmutex );
-
-     
+     semaphore_down( &fullmutex ); /* get lock of reading semaphore full */
+ 
      /* check if eof flag is on */ 
-     /*
-     if( gloinfoptr->eofflag == ON && 
-         semaphore_value(&full)== 0 ){
-         semaphore_up( &fullmutex ); 
-         pthread_exit( (void *)EXIT_SUCCESS );
-     }
-     */
-
      if( semaphore_value(&full) == 0 ){
-        if( gloinfoptr->eofflag == ON  ){
+        if( gloinfo.eofflag == ON  ){ 
+           /*read threads are done, buffer is empty ,the thread exits*/
+          
+           /* release lock of reading semaphore 'full' */
            semaphore_up( &fullmutex );
            pthread_exit( (void*)EXIT_SUCCESS );
         }
-        else{
+        else{ /* buffer is empty , but read threads arn't done */ 
            semaphore_up( &fullmutex );
            continue;
         }
      }
-     /*
-     while( semaphore_value(&full) == 0 ){
-        if( gloinfoptr->eofflag == ON  )
-          pthread_exit( (void*)EXIT_SUCCESS );
-        else
-          sleep(1);
-     }
-     */
-     /*fprintf(stderr, "%d\n", semaphore_value(&full) );*/
 
-     semaphore_down( &full );
-     semaphore_up( &fullmutex ); 
-    
+     semaphore_down( &full ); /* decrement semaphore full, operation P */
+     semaphore_up( &fullmutex );/* release lock of reading semaphore full */ 
      
-     /*fprintf(stderr, "w %ld full\n", (long)pthread_self() );*/
-     semaphore_down( &readbuffer );     
-     semaphore_down( &write );
+     semaphore_down( &readbuffer ); /* get lock of reading shared buffer */ 
+     semaphore_down( &write ); /* get lock of writing target file */
   
      /* get line from buffer */
-     strcpy( line, gloinfoptr->buffer[gloinfoptr->rptr] );
+     strcpy( line, gloinfo.buffer[gloinfo.rptr] );
 
      /* free read line */
-     free( gloinfoptr->buffer[gloinfoptr->rptr] );
-     gloinfoptr->buffer[gloinfoptr->rptr] = NULL;
+     free( gloinfo.buffer[gloinfo.rptr] );
+     gloinfo.buffer[gloinfo.rptr] = NULL;
 
-      
-     gloinfoptr->rptr = (gloinfoptr->rptr+1)%BUFSIZE;
+     /* move rptr to next position */ 
+     gloinfo.rptr = (gloinfo.rptr+1)%BUFSIZE;
      semaphore_up( &readbuffer );
 
-     if ( fputs( line, gloinfoptr->writefd ) == EOF ){
+     if ( fputs( line, gloinfo.writefd ) == EOF ){
         perror("I/O error");
         exit(EXIT_FAILURE);
      }
     
-     /* for test */
-     /*fprintf(stderr, "%s", line );*/
-
-     semaphore_up( &empty ); 
-     semaphore_up( &write );
+     semaphore_up( &empty ); /* increment semaphore empty, operation V */ 
+     semaphore_up( &write ); /* release lock of writing target file */
    }
+
 }
 
 
 
-void* read_sourcefile( void *gloinfo )
+void* read_sourcefile( void *data )
 {
-  
-   global_info *gloinfoptr;
    char* line;
 
-   /* for test */
-   /*fprintf(stderr, "%ld start\n", (long)pthread_self() );*/
-
-   gloinfoptr = ( global_info* )gloinfo;
-
-   /*fprintf(stderr, "r %ld start\n", (long)pthread_self() );*/
    while(1){
   
      /* check if eof flag is on */
-     if( gloinfoptr->eofflag == ON  ){
-        /*fprintf(stderr, "r %ld quit\n", (long)pthread_self() );*/
+     if( gloinfo.eofflag == ON  ){
         pthread_exit( (void *)EXIT_SUCCESS );
      }
 
-     semaphore_down( &empty );
-     semaphore_down( &read );     
-     semaphore_down( &writebuffer );
+     semaphore_down( &empty ); /* decrement semaphore empty, Operation P */
+     semaphore_down( &read );  /* get lock of reading source file */ 
+     semaphore_down( &writebuffer ); /* get lock of writing to buffer */
    
      line = (char*)Malloc( sizeof(char) * LINELEN ); 
-     line = fgets(line, LINELEN, gloinfoptr->readfd );
+     line = fgets(line, LINELEN, gloinfo.readfd );
 
      if( line == NULL ){
-
-        if( ferror( gloinfoptr->readfd ) != 0 ){
-          /* error occurs */
+        
+        if( ferror( gloinfo.readfd ) != 0 ){
+          /* I/O error occurs */
           perror("I/O error");
           exit( EXIT_FAILURE );
         }
         else{ /* eof */
-          gloinfoptr->eofflag = ON; 
+          gloinfo.eofflag = ON;  /* set eof flag */
         }
      }
 
-     semaphore_up( &read );
+     semaphore_up( &read ); /* release lock of reading source file */
 
-     /* if only eofflag is off, add line to buffer */
-     if( gloinfoptr->eofflag == OFF ){
-         gloinfoptr->buffer[gloinfoptr->wptr] = line;
-         /* for test */ 
-         /*fprintf(stderr, "%s", line );*/
+     /* if eof flag is off, add line to buffer */
+     if( gloinfo.eofflag == OFF ){
+
+         gloinfo.buffer[gloinfo.wptr] = line;
+
          /* move ptr to next available position */
-         gloinfoptr->wptr = (gloinfoptr->wptr+1)%BUFSIZE;
+         gloinfo.wptr = (gloinfo.wptr+1)%BUFSIZE;
+         /* incerement semaphore full, operation V */ 
          semaphore_up( &full ); 
      } 
 
-     semaphore_up( &writebuffer );
+     semaphore_up( &writebuffer ); /* release lock of writing to buffer */
    }
 }
 
 
-
 /* wrapper functions */
-
-FILE* Fopen( const char *filename, const char *mode )
+FILE* 
+Fopen( const char *filename, const char *mode )
 {
    FILE* result;
 
@@ -301,7 +282,23 @@ FILE* Fopen( const char *filename, const char *mode )
 }
 
 
-void Pthread_create( pthread_t *tidp, 
+void 
+Pthread_join( pthread_t thread, void **rval_ptr )
+{
+  if( pthread_join( thread, rval_ptr ) != 0 ){ /* join error */
+    perror("thread join error"); 
+    exit(EXIT_FAILURE);
+  }
+
+  if( (int)(*rval_ptr) != EXIT_SUCCESS ){ /* thread is failure */
+    fprintf(stderr, "The return value of thread is not EXIT_SUCCESS\n");
+    exit(EXIT_FAILURE);
+  }
+}
+
+
+void 
+Pthread_create( pthread_t *tidp, 
                      const pthread_attr_t *attr,
                      void *(*start_rtn)(void*),
                      void *arg ){
@@ -317,7 +314,8 @@ void Pthread_create( pthread_t *tidp,
 }
 
 
-void* Malloc( size_t size )
+void* 
+Malloc( size_t size )
 {
    void* result;
    result = malloc( size );
@@ -327,4 +325,33 @@ void* Malloc( size_t size )
    }
    return result;
 }
+
+
+/* exit handler */
+void 
+exit_handler()
+{ 
+  int i;
+
+  /* free buffer */
+  for( i=0; i<BUFSIZE; i++ ){
+    free(gloinfo.buffer[i]);
+  }
+  free( gloinfo.buffer );
+
+  /* close all descriptors */
+  fclose( gloinfo.readfd);
+  fclose( gloinfo.writefd);
+
+  /* destroy all semaphores */
+  semaphore_destroy( &read );
+  semaphore_destroy( &write );
+  semaphore_destroy( &readbuffer );
+  semaphore_destroy( &writebuffer );
+  semaphore_destroy( &empty );
+  semaphore_destroy( &full );
+  semaphore_destroy( &fullmutex );
+}
+
+
 
