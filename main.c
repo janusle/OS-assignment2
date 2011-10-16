@@ -155,7 +155,7 @@ void* write_targetfile( void *gloinfo )
    char line[LINELEN];
 
    /* for test */
-   fprintf(stderr, "%ld start\n", (long)pthread_self() );
+   /*fprintf(stderr, "%ld start\n", (long)pthread_self() );*/
 
    gloinfoptr = ( global_info* )gloinfo;
    
@@ -166,13 +166,24 @@ void* write_targetfile( void *gloinfo )
 
      
      /* check if eof flag is on */ 
+     /*
      if( gloinfoptr->eofflag == ON && 
          semaphore_value(&full)== 0 ){
-         fprintf(stderr, "w %ld quit\n", (long)pthread_self() );
          semaphore_up( &fullmutex ); 
          pthread_exit( (void *)EXIT_SUCCESS );
      }
+     */
 
+     if( semaphore_value(&full) == 0 ){
+        if( gloinfoptr->eofflag == ON  ){
+           semaphore_up( &fullmutex );
+           pthread_exit( (void*)EXIT_SUCCESS );
+        }
+        else{
+           semaphore_up( &fullmutex );
+           continue;
+        }
+     }
      /*
      while( semaphore_value(&full) == 0 ){
         if( gloinfoptr->eofflag == ON  )
@@ -228,12 +239,12 @@ void* read_sourcefile( void *gloinfo )
 
    gloinfoptr = ( global_info* )gloinfo;
 
-   fprintf(stderr, "r %ld start\n", (long)pthread_self() );
+   /*fprintf(stderr, "r %ld start\n", (long)pthread_self() );*/
    while(1){
   
      /* check if eof flag is on */
      if( gloinfoptr->eofflag == ON  ){
-        fprintf(stderr, "r %ld quit\n", (long)pthread_self() );
+        /*fprintf(stderr, "r %ld quit\n", (long)pthread_self() );*/
         pthread_exit( (void *)EXIT_SUCCESS );
      }
 
